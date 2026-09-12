@@ -1,0 +1,1 @@
+{"name":"@jarvis/desktop","version":"0.0.0","private":true,"type":"module","scripts":{"dev":"node ./src/server.mjs","build":"echo ok","typecheck":"echo ok","test":"echo ok"},"dependencies":{}}

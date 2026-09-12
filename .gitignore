@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.turbo/
+*.log
+scripts/token-guard/state/usage.log
+scripts/token-guard/state/limit-detected.json
+scripts/token-guard/state/active-model.json
+scripts/token-guard/state/observer.pid
+scripts/token-guard/state/observer.out

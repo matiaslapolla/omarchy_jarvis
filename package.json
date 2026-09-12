@@ -1,0 +1,1 @@
+{"name":"jarvis-os","private":true,"packageManager":"pnpm@9.15.0","scripts":{"build":"turbo run build","typecheck":"turbo run typecheck","test":"turbo run test","verify":"bash scripts/verify-phase1.sh"},"devDependencies":{"@types/node":"^22.20.2","turbo":"^2.5.4","typescript":"^5.6.3"}}
