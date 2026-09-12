@@ -1,0 +1,1 @@
+{"dependencies":{"zod":"^3.23.8"},"devDependencies":{"typescript":"^5.6.3"},"exports":{".":{"import":"./dist/index.js","types":"./dist/index.d.ts"}},"main":"./dist/index.js","name":"@jarvis/browser","scripts":{"build":"tsc -p .","test":"echo ok","typecheck":"tsc -p . --noEmit"},"type":"module","types":"./dist/index.d.ts","version":"0.0.0"}

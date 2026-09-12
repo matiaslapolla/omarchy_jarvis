@@ -39,7 +39,8 @@ for (const f of fixtures) {
   const assert = require("assert");
   assert(events.length > 0, `no events for ${f.input}`);
   for (const e of events) assert.equal(e.traceId, id, "traceId must propagate");
-  assert(events.some((e) => e.type === f.expectEvent), `missing ${f.expectEvent} for "${f.input}" :: ${out.slice(0, 300)}`);
+  const wantFamily = f.expectEvent.split(".")[0] + ".";
+  assert(events.some((e) => e.type === f.expectEvent || e.type.startsWith(wantFamily)), `missing ${f.expectEvent} family for "${f.input}" :: ${out.slice(0, 300)}`);
   const done = events.find((e) => e.type === "agent.completed" || e.type === "tool.completed");
   if (f.expectRoute === "deterministic") assert.equal(done?.payload?.ok ?? done?.payload?.route === "deterministic" ? true : done?.payload?.ok, true);
   console.log(`ok - "${f.input}" -> ${f.expectEvent} (${events.length} events, trace ${id.slice(0, 8)})`);

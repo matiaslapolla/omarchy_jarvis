@@ -1,9 +1,18 @@
 import type { BaseEvent, UserInput } from "@jarvis/protocol";
 import { DEFAULT_LIMITS, detectIntent, selectRoute } from "@jarvis/core";
 import type { LLMProvider } from "@jarvis/providers";
+import type { Registry } from "@jarvis/tools";
+import { createDefaultRegistry, runToolCall } from "./tools.js";
 
 export interface PipelineDeps {
   provider: LLMProvider;
+}
+
+let sharedRegistry: Registry | undefined;
+
+function defaultRegistry(): Registry {
+  sharedRegistry ??= createDefaultRegistry();
+  return sharedRegistry;
 }
 
 function event(traceId: string, type: BaseEvent["type"], payload: unknown): BaseEvent {
@@ -35,9 +44,42 @@ export async function* runInput(
   const route = selectRoute(intent);
 
   if (route === "deterministic") {
-    guard();
-    const action = /^volume|volumen|mute/i.test(text.trim()) ? "system.volume" : "system.open_app";
-    yield event(traceId, "tool.completed", { tool: action, intent, confidence, ok: true });
+    const reg = defaultRegistry();
+    const t = text.trim();
+    const dispatch = async function* (id: string, raw: unknown): AsyncIterable<BaseEvent> {
+      for await (const e of runToolCall(reg, id, raw, traceId)) {
+        guard();
+        yield e;
+      }
+    };
+    const match = async function* (): AsyncIterable<BaseEvent> {
+      let m: RegExpMatchArray | null;
+      if ((m = t.match(/^(open|abre)\s+(.+)/i)) != null) {
+        yield* dispatch("system.open_app", { app: m[2] });
+      } else if (/volume|volumen/i.test(t)) {
+        const n = t.match(/\d+/);
+        yield* dispatch("system.volume", n != null ? { level: Number(n[0]) } : {});
+      } else if (/screenshot|pantalla/i.test(t)) {
+        yield* dispatch("system.screenshot", {});
+      } else if ((m = t.match(/^(?:notify|notific[a-z]*)\s+(.+)/i)) != null) {
+        yield* dispatch("system.notification", { title: m[1] });
+      } else if ((m = t.match(/^(read|lee)\s+(\S+)/i)) != null) {
+        yield* dispatch("files.read", { path: m[2] });
+      } else if ((m = t.match(/^(list|lista)(?:\s+(\S+))?/i)) != null) {
+        yield* dispatch("files.list", { dir: m[2] ?? "." });
+      } else if ((m = t.match(/^(?:search|busca)\s+(\S+)/i)) != null) {
+        yield* dispatch("files.search", { pattern: m[1] });
+      } else if ((m = t.match(/^(write|escribe)\s+(\S+)\s+([\s\S]+)/i)) != null) {
+        yield* dispatch("files.write", { path: m[2], content: m[3] });
+      } else if ((m = t.match(/^run\s+([\s\S]+)/i)) != null) {
+        yield* dispatch("terminal.run", { cmd: m[1] });
+      } else if ((m = t.match(/^browse\s+(https?\S+)/i)) != null) {
+        yield* dispatch("browser.navigate", { url: m[1] });
+      } else {
+        yield event(traceId, "tool.failed", { tool: "router", code: "NO_MATCH", message: t });
+      }
+    };
+    yield* match();
     yield event(traceId, "agent.completed", { text: "Done.", finishReason: "stop", route });
     return;
   }

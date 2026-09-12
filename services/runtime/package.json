@@ -13,11 +13,14 @@
     "typecheck": "tsc -p . --noEmit"
   },
   "dependencies": {
+    "@jarvis/browser": "workspace:*",
     "@jarvis/config": "workspace:*",
     "@jarvis/core": "workspace:*",
     "@jarvis/observability": "workspace:*",
+    "@jarvis/permissions": "workspace:*",
     "@jarvis/protocol": "workspace:*",
     "@jarvis/providers": "workspace:*",
+    "@jarvis/tools": "workspace:*",
     "zod": "^3.23.8"
   },
   "devDependencies": {

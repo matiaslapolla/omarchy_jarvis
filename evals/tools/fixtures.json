@@ -1,0 +1,8 @@
+[
+  { "input": "open firefox", "expectEvent": "tool.completed" },
+  { "input": "volume 40", "expectEvent": "tool.completed" },
+  { "input": "list .", "expectEvent": "tool.completed" },
+  { "input": "write notes.txt hello jarvis", "expectEvent": "tool.failed", "reason": "CONFIRM needs approval" },
+  { "input": "run sudo rm -rf /", "expectEvent": "tool.failed", "reason": "denied or approval, never executed" },
+  { "input": "browse https://example.com", "expectEvent": "tool.completed", "reason": "memory backend stub" }
+]
