@@ -1,0 +1,1 @@
+[{"expectSource": "vision|system", "query": "mira mi pantalla"}, {"expectSource": "project", "query": "fix the login bug"}, {"expectSource": "none|system", "query": "hola"}]

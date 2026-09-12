@@ -1,7 +1,7 @@
 import Fastify from "fastify";
 import { z } from "zod";
 import { UserInputSchema } from "@jarvis/protocol";
-import { runInput, runDelegated } from "@jarvis/runtime";
+import { contextFor, detectIntent, runInput, runDelegated } from "@jarvis/runtime";
 import { LocalProvider } from "@jarvis/providers";
 
 const PORT = Number(process.env.GATEWAY_PORT ?? 8787);
@@ -284,6 +284,30 @@ export function buildServer() {
     }
     reply.raw.end();
     return reply;
+  });
+
+  // ADR-0001 Phase 7: advanced-context inspection. contextFor() never throws
+  // and degrades to an empty block while @jarvis/context / @jarvis/vision
+  // are still landing, so this endpoint never 500s (catch maps to empty).
+  app.get("/v1/context", async (req, reply) => {
+    const params = (req.query ?? {}) as { query?: unknown; workspace?: unknown };
+    const query = typeof params.query === "string" ? params.query : "";
+    if (query.trim() === "") {
+      return reply.code(400).send({ code: "VALIDATION_ERROR" });
+    }
+    const traceId = globalThis.crypto.randomUUID();
+    try {
+      const workspace =
+        typeof params.workspace === "string" && params.workspace !== ""
+          ? params.workspace
+          : (process.env.JARVIS_WORKSPACE ?? process.cwd());
+      const { intent } = detectIntent(query);
+      const { block, tokens } = await contextFor({ content: query, intent, workspace });
+      return { block, tokens, traceId };
+    } catch (err) {
+      console.error(JSON.stringify({ level: "warn", code: "CONTEXT_UNAVAILABLE", err: String(err) }));
+      return { block: "", tokens: 0, traceId };
+    }
   });
 
   app.post("/v1/tasks", async (req, reply) => {

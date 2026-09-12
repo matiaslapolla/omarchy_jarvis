@@ -4,6 +4,7 @@ import type { LLMProvider } from "@jarvis/providers";
 import type { Registry } from "@jarvis/tools";
 import { createDefaultRegistry, runToolCall } from "./tools.js";
 import { runDelegated } from "./delegate.js";
+import { contextFor } from "./context.js";
 import { memorySystemBlock, recallFor, rememberTurn } from "./memory.js";
 
 export interface PipelineDeps {
@@ -108,9 +109,14 @@ export async function* runInput(
   guard();
   yield event(traceId, "agent.started", { model: deps.provider.id, route, intent, confidence });
   const mems = await recallFor(text, 5);
+  // ADR-0001 Phase 7: advanced context (system/project/vision) on the local
+  // route only. The pipeline-level recall above stays the single recallFor
+  // call site here; contextFor() reuses the same cached store for memory.
+  const workspace = input.metadata?.currentDirectory ?? process.env.JARVIS_WORKSPACE ?? process.cwd();
+  const adv = await contextFor({ content: text, intent, workspace });
   const req = {
     messages: [{ role: "user", content: text }],
-    system: BASE_SYSTEM_PROMPT + memorySystemBlock(mems),
+    system: BASE_SYSTEM_PROMPT + memorySystemBlock(mems) + (adv.block ? `\n${adv.block}` : ""),
   };
   if (deps.provider.generateStream != null) {
     let full = "";

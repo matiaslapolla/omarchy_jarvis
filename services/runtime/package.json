@@ -15,6 +15,7 @@
   "dependencies": {
     "@jarvis/browser": "workspace:*",
     "@jarvis/config": "workspace:*",
+    "@jarvis/context": "workspace:*",
     "@jarvis/core": "workspace:*",
     "@jarvis/harness": "workspace:*",
     "@jarvis/memory": "workspace:*",
@@ -23,6 +24,7 @@
     "@jarvis/protocol": "workspace:*",
     "@jarvis/providers": "workspace:*",
     "@jarvis/tools": "workspace:*",
+    "@jarvis/vision": "workspace:*",
     "zod": "^3.23.8"
   },
   "devDependencies": {
