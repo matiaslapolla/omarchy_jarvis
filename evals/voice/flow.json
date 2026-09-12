@@ -1,0 +1,11 @@
+[
+  {
+    "send": { "type": "text", "content": "list ." },
+    "expect_sequence": ["state:TRANSCRIBING", "final", "tts.done"]
+  },
+  {
+    "send_barge": { "type": "interrupt" },
+    "during": "SPEAKING",
+    "expect": ["state:INTERRUPTED", "state:LISTENING"]
+  }
+]

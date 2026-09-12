@@ -1,6 +1,9 @@
 node_modules/
 dist/
 .turbo/
+.venv/
+__pycache__/
+*.pyc
 *.log
 scripts/token-guard/state/usage.log
 scripts/token-guard/state/limit-detected.json
