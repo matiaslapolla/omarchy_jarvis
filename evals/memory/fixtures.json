@@ -1,0 +1,1 @@
+[{"user":"prefiero respuestas cortas","expectType":"preference"},{"user":"my editor is cursor","expectType":"semantic"},{"recall":"qué editor uso?","expectContains":"cursor"}]

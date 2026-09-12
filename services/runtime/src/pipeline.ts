@@ -1,9 +1,10 @@
 import type { BaseEvent, Intent, UserInput } from "@jarvis/protocol";
-import { DEFAULT_LIMITS, detectIntent, selectRoute } from "@jarvis/core";
+import { BASE_SYSTEM_PROMPT, DEFAULT_LIMITS, detectIntent, selectRoute } from "@jarvis/core";
 import type { LLMProvider } from "@jarvis/providers";
 import type { Registry } from "@jarvis/tools";
 import { createDefaultRegistry, runToolCall } from "./tools.js";
 import { runDelegated } from "./delegate.js";
+import { memorySystemBlock, recallFor, rememberTurn } from "./memory.js";
 
 export interface PipelineDeps {
   provider: LLMProvider;
@@ -93,6 +94,7 @@ export async function* runInput(
     };
     yield* match();
     yield event(traceId, "agent.completed", { text: "Done.", finishReason: "stop", route });
+    for (const e of await rememberTurn(text, "Done.", traceId)) yield e;
     return;
   }
 
@@ -105,7 +107,11 @@ export async function* runInput(
 
   guard();
   yield event(traceId, "agent.started", { model: deps.provider.id, route, intent, confidence });
-  const req = { messages: [{ role: "user", content: text }] };
+  const mems = await recallFor(text, 5);
+  const req = {
+    messages: [{ role: "user", content: text }],
+    system: BASE_SYSTEM_PROMPT + memorySystemBlock(mems),
+  };
   if (deps.provider.generateStream != null) {
     let full = "";
     for await (const delta of deps.provider.generateStream(req)) {
@@ -113,9 +119,11 @@ export async function* runInput(
       yield event(traceId, "agent.delta", { delta });
     }
     yield event(traceId, "agent.completed", { text: full, finishReason: "stop", route });
+    for (const e of await rememberTurn(text, full, traceId)) yield e;
   } else {
     const res = await deps.provider.generate(req);
     yield event(traceId, "agent.delta", { delta: res.text });
     yield event(traceId, "agent.completed", { text: res.text, finishReason: res.finishReason, route });
+    for (const e of await rememberTurn(text, res.text, traceId)) yield e;
   }
 }

@@ -17,6 +17,7 @@
     "@jarvis/config": "workspace:*",
     "@jarvis/core": "workspace:*",
     "@jarvis/harness": "workspace:*",
+    "@jarvis/memory": "workspace:*",
     "@jarvis/observability": "workspace:*",
     "@jarvis/permissions": "workspace:*",
     "@jarvis/protocol": "workspace:*",

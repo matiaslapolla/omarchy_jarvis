@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@jarvis/config": "workspace:*",
+    "@jarvis/memory": "workspace:*",
     "@jarvis/observability": "workspace:*",
     "@jarvis/protocol": "workspace:*",
     "@jarvis/providers": "workspace:*",
