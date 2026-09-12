@@ -1,0 +1,30 @@
+{
+  "dependencies": {
+    "@jarvis/harness": "workspace:*",
+    "@jarvis/permissions": "workspace:*",
+    "@jarvis/providers": "workspace:*",
+    "@jarvis/tools": "workspace:*",
+    "bullmq": "^5.4.0",
+    "ioredis": "^5.4.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "main": "./dist/index.js",
+  "name": "@jarvis/tasks",
+  "scripts": {
+    "build": "tsc -p .",
+    "test": "echo ok",
+    "typecheck": "tsc -p . --noEmit"
+  },
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "version": "0.0.0"
+}

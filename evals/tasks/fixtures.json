@@ -1,0 +1,1 @@
+[{"kind":"background","prompt":"summarize repo layout","expectStatus":"completed"},{"kind":"coding","prompt":"list files in workspace","expectStatus":"completed"},{"invalid":{"kind":"nope"}}]

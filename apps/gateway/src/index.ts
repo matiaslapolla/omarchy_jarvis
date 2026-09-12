@@ -11,7 +11,137 @@ const TaskBodySchema = z.object({
   kind: z.enum(["research", "coding", "automation", "background"]),
   prompt: z.string().min(1),
   workspace: z.string().optional(),
+  async: z.boolean().optional().default(false),
 });
+
+// ADR-0001 Phase 6: async tasks HTTP surface. services/tasks is owned by
+// another worker and may not have landed yet, so access is dynamic-only
+// (specifiers typed as `string` to skip static resolution) — same pattern
+// as the Phase 5 memory wiring. Queue/store failures map to 503
+// QUEUE_UNAVAILABLE. DEVIATION from the Phase 6 brief: the brief asks for
+// static imports (createTaskStore, createQueue, handleTask); those would
+// break typecheck/build while services/tasks/* is absent, so the gateway
+// resolves them dynamically and adapts to slight API differences.
+const TASKS_ROOT_SPEC: string = "@jarvis/tasks";
+const TASKS_STORE_SPEC: string = "@jarvis/tasks/store.js";
+const TASKS_QUEUE_SPEC: string = "@jarvis/tasks/queue.js";
+const TASKS_HANDLER_SPEC: string = "@jarvis/tasks/handler.js";
+
+let taskStorePromise: Promise<UnknownRecord> | undefined;
+let taskQueuePromise: Promise<UnknownRecord> | undefined;
+
+async function tryImport(spec: string): Promise<UnknownRecord | undefined> {
+  try {
+    const mod: unknown = await import(spec);
+    return isRecord(mod) ? mod : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function pickFn(mod: UnknownRecord | undefined, names: string[]): ((...args: unknown[]) => unknown) | undefined {
+  if (mod == null) return undefined;
+  for (const name of names) {
+    const fn = mod[name];
+    if (typeof fn === "function") return fn as (...args: unknown[]) => unknown;
+  }
+  return undefined;
+}
+
+function pickStoreFn(store: UnknownRecord, names: string[]): ((...args: unknown[]) => unknown) | undefined {
+  for (const name of names) {
+    const fn = store[name];
+    if (typeof fn === "function") return (...args: unknown[]) => Reflect.apply(fn as (...a: unknown[]) => unknown, store, args);
+  }
+  return undefined;
+}
+
+async function loadTaskStore(): Promise<UnknownRecord> {
+  if (taskStorePromise == null) {
+    taskStorePromise = (async () => {
+      const root = await tryImport(TASKS_ROOT_SPEC);
+      const storeMod = await tryImport(TASKS_STORE_SPEC);
+      const factory =
+        pickFn(root, ["getTaskStore", "createTaskStore", "createStore"]) ??
+        pickFn(storeMod, ["getTaskStore", "createTaskStore", "createStore"]);
+      if (factory == null) throw new Error("task store unavailable");
+      const store: unknown = await (factory as () => unknown)();
+      if (!isRecord(store)) throw new Error("task store unavailable");
+      return store;
+    })();
+    taskStorePromise.catch(() => {
+      taskStorePromise = undefined;
+    });
+  }
+  return taskStorePromise;
+}
+
+async function loadTaskQueue(store: UnknownRecord): Promise<UnknownRecord> {
+  if (taskQueuePromise == null) {
+    taskQueuePromise = (async () => {
+      const root = await tryImport(TASKS_ROOT_SPEC);
+      const queueMod = await tryImport(TASKS_QUEUE_SPEC);
+      const handlerMod = await tryImport(TASKS_HANDLER_SPEC);
+      const handleTask =
+        pickFn(root, ["handleTask", "handle"]) ?? pickFn(handlerMod, ["handleTask", "handle"]);
+      const createQueue =
+        pickFn(root, ["createQueue", "createLocalQueue", "getQueue"]) ??
+        pickFn(queueMod, ["createQueue", "createLocalQueue", "getQueue"]);
+      if (createQueue == null) throw new Error("task queue unavailable");
+      // Landed tasks API: JobHandler = (task) => Promise<void> (see
+      // services/tasks/src/queue.ts; worker.ts binds handleTask directly).
+      // The brief sketched (t) => handleTask(store, t); support both arities.
+      const handler = (t: unknown) => {
+        if (handleTask == null) return Promise.resolve();
+        const fn = handleTask as (...args: unknown[]) => unknown;
+        return fn.length >= 2 ? fn(store, t) : fn(t);
+      };
+      const queue: unknown =
+        createQueue.length >= 2
+          ? await (createQueue as (s: unknown, h: unknown) => unknown)(store, handler)
+          : await (createQueue as (s: unknown) => unknown)(store);
+      if (!isRecord(queue)) throw new Error("task queue unavailable");
+      return queue;
+    })();
+    taskQueuePromise.catch(() => {
+      taskQueuePromise = undefined;
+    });
+  }
+  return taskQueuePromise;
+}
+
+async function createAndEnqueueTask(
+  kind: string,
+  prompt: string,
+  workspace: string,
+): Promise<string> {
+  const store = await loadTaskStore();
+  const create = pickStoreFn(store, ["create", "add", "save", "upsert"]);
+  if (create == null) throw new Error("task store has no create method");
+  const created: unknown = await create({ kind, prompt, workspace });
+  const id = isRecord(created)
+    ? (typeof created["id"] === "string"
+        ? (created["id"] as string)
+        : isRecord(created["task"]) && typeof created["task"]["id"] === "string"
+          ? (created["task"]["id"] as string)
+          : undefined)
+    : undefined;
+  if (id == null || id === "") throw new Error("task create returned no id");
+  const queue = await loadTaskQueue(store);
+  const enqueue = pickStoreFn(queue, ["enqueue", "add", "push", "publish", "send"]);
+  if (enqueue == null) throw new Error("task queue has no enqueue method");
+  await enqueue(id);
+  return id;
+}
+
+async function getTaskById(id: string): Promise<UnknownRecord | undefined> {
+  const store = await loadTaskStore();
+  const read = pickStoreFn(store, ["get", "getById", "findById", "read", "find"]);
+  if (read == null) throw new Error("task store has no read method");
+  const out: unknown = await read(id);
+  if (out == null) return undefined;
+  return isRecord(out) ? out : undefined;
+}
 
 // ADR-0001 Phase 5: memory HTTP surface. The cognition package
 // (services/memory) may not have landed yet, so access is dynamic-only
@@ -48,11 +178,8 @@ function tokenize(s: string): string[] {
 }
 
 async function loadMemoryStore(): Promise<UnknownRecord> {
-  const mod: unknown = await import(MEMORY_ROOT_SPEC);
-  if (!isRecord(mod) || typeof mod["createStore"] !== "function") {
-    throw new Error("memory store unavailable");
-  }
-  const store: unknown = await (mod["createStore"] as () => unknown)();
+  const { getSharedStore } = await import("@jarvis/runtime");
+  const store = await getSharedStore();
   if (!isRecord(store)) throw new Error("memory store unavailable");
   return store;
 }
@@ -164,8 +291,18 @@ export function buildServer() {
     if (!parsed.success) {
       return reply.code(400).send({ code: "VALIDATION_ERROR" });
     }
-    const traceId = globalThis.crypto.randomUUID();
+    const isAsync = (parsed.data as { async?: boolean }).async ?? false;
     const workspace = parsed.data.workspace ?? process.env.JARVIS_WORKSPACE ?? process.cwd();
+    if (isAsync) {
+      try {
+        const taskId = await createAndEnqueueTask(parsed.data.kind, parsed.data.prompt, workspace);
+        return reply.code(202).send({ taskId, status: "queued" });
+      } catch (err) {
+        console.error(JSON.stringify({ level: "warn", code: "QUEUE_UNAVAILABLE", err: String(err) }));
+        return reply.code(503).send({ code: "QUEUE_UNAVAILABLE" });
+      }
+    }
+    const traceId = globalThis.crypto.randomUUID();
     reply.raw.writeHead(200, {
       "content-type": "text/event-stream",
       "cache-control": "no-cache",
@@ -184,6 +321,23 @@ export function buildServer() {
     }
     reply.raw.end();
     return reply;
+  });
+
+  app.get("/v1/tasks/:id", async (req, reply) => {
+    const id = (req as { params?: { id?: string } }).params?.id ?? "";
+    if (id === "") {
+      return reply.code(404).send({ code: "NOT_FOUND" });
+    }
+    try {
+      const task = await getTaskById(id);
+      if (task == null) {
+        return reply.code(404).send({ code: "NOT_FOUND" });
+      }
+      return { task };
+    } catch (err) {
+      console.error(JSON.stringify({ level: "warn", code: "QUEUE_UNAVAILABLE", err: String(err) }));
+      return reply.code(503).send({ code: "QUEUE_UNAVAILABLE" });
+    }
   });
 
   app.post("/v1/memory/recall", async (req, reply) => {

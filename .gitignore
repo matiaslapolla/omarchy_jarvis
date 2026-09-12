@@ -4,6 +4,7 @@ dist/
 .venv/
 __pycache__/
 *.pyc
+artifacts/
 *.log
 scripts/token-guard/state/usage.log
 scripts/token-guard/state/limit-detected.json

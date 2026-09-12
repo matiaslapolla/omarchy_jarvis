@@ -1,0 +1,11 @@
+CREATE TABLE IF NOT EXISTS tasks (
+  id UUID PRIMARY KEY,
+  kind TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  workspace TEXT NOT NULL DEFAULT '.',
+  status TEXT NOT NULL DEFAULT 'queued',
+  result JSONB,
+  error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

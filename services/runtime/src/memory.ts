@@ -46,8 +46,12 @@ function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === "object" && value !== null;
 }
 
-async function loadStore(): Promise<UnknownRecord | undefined> {
-  if (storeBroken) return undefined;
+/** Shared process-wide store so HTTP endpoints and pipeline see the same memories. */
+export async function getSharedStore(): Promise<UnknownRecord | undefined> {
+  return loadStore();
+}
+
+async function loadStore(): Promise<UnknownRecord | undefined> {  if (storeBroken) return undefined;
   storePromise ??= (async (): Promise<UnknownRecord | undefined> => {
     try {
       const mod: unknown = await import(MEMORY_ROOT_SPEC);

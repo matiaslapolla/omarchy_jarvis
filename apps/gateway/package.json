@@ -20,6 +20,7 @@
     "@jarvis/protocol": "workspace:*",
     "@jarvis/providers": "workspace:*",
     "@jarvis/runtime": "workspace:*",
+    "@jarvis/tasks": "workspace:*",
     "fastify": "^5.2.0",
     "zod": "^3.23.8"
   },
