@@ -74,6 +74,22 @@ importers:
         specifier: ^5.6.3
         version: 5.9.3
 
+  packages/harness:
+    dependencies:
+      '@jarvis/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@jarvis/providers':
+        specifier: workspace:*
+        version: link:../providers
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+    devDependencies:
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+
   packages/observability:
     dependencies:
       zod:
@@ -164,6 +180,9 @@ importers:
       '@jarvis/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@jarvis/harness':
+        specifier: workspace:*
+        version: link:../../packages/harness
       '@jarvis/observability':
         specifier: workspace:*
         version: link:../../packages/observability

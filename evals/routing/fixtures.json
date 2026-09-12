@@ -1,6 +1,22 @@
 [
-  { "input": "open cursor", "expectRoute": "deterministic", "expectEvent": "tool.completed" },
-  { "input": "hola, ¿cómo estás?", "expectRoute": "local", "expectEvent": "agent.completed" },
-  { "input": "research transformers while i work", "expectRoute": "background", "expectEvent": "agent.completed" },
-  { "input": "fix the login bug", "expectRoute": "codex", "expectEvent": "agent.completed" }
+  {
+    "input": "open cursor",
+    "expectRoute": "deterministic",
+    "expectEvent": "tool.completed"
+  },
+  {
+    "input": "hola, ¿cómo estás?",
+    "expectRoute": "local",
+    "expectEvent": "agent.completed"
+  },
+  {
+    "input": "research transformers while i work",
+    "expectRoute": "background",
+    "expectEvent": "agent.completed"
+  },
+  {
+    "input": "fix the login bug",
+    "expectRoute": "opencode",
+    "expectEvent": "agent.completed"
+  }
 ]

@@ -1,0 +1,1 @@
+[{"input":"fix the login bug","route":"opencode","expectEvent":"agent.completed"},{"input":"research transformers while i work","route":"background","expectEvent":"task.completed"},{"input":"hola","route":"local","expectEvent":"agent.completed"}]

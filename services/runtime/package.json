@@ -16,6 +16,7 @@
     "@jarvis/browser": "workspace:*",
     "@jarvis/config": "workspace:*",
     "@jarvis/core": "workspace:*",
+    "@jarvis/harness": "workspace:*",
     "@jarvis/observability": "workspace:*",
     "@jarvis/permissions": "workspace:*",
     "@jarvis/protocol": "workspace:*",

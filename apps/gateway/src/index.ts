@@ -1,10 +1,17 @@
 import Fastify from "fastify";
+import { z } from "zod";
 import { UserInputSchema } from "@jarvis/protocol";
-import { runInput } from "@jarvis/runtime";
+import { runInput, runDelegated } from "@jarvis/runtime";
 import { LocalProvider } from "@jarvis/providers";
 
 const PORT = Number(process.env.GATEWAY_PORT ?? 8787);
 const MODEL_URL = process.env.LOCAL_MODEL_URL ?? "http://127.0.0.1:11421";
+
+const TaskBodySchema = z.object({
+  kind: z.enum(["research", "coding", "automation", "background"]),
+  prompt: z.string().min(1),
+  workspace: z.string().optional(),
+});
 
 export function buildServer() {
   const app = Fastify({ logger: false });
@@ -32,6 +39,33 @@ export function buildServer() {
       const code = (err as { code?: string }).code ?? "SYSTEM_ERROR";
       reply.raw.write(
         `data: ${JSON.stringify({ id: globalThis.crypto.randomUUID(), type: "tool.failed", timestamp: new Date().toISOString(), traceId: input.id, payload: { code } })}\n\n`,
+      );
+    }
+    reply.raw.end();
+    return reply;
+  });
+
+  app.post("/v1/tasks", async (req, reply) => {
+    const parsed = TaskBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ code: "VALIDATION_ERROR" });
+    }
+    const traceId = globalThis.crypto.randomUUID();
+    const workspace = parsed.data.workspace ?? process.env.JARVIS_WORKSPACE ?? process.cwd();
+    reply.raw.writeHead(200, {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+      connection: "keep-alive",
+    });
+    try {
+      for await (const event of runDelegated(parsed.data.kind, parsed.data.prompt, workspace, traceId, "background")) {
+        reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+      }
+    } catch (err) {
+      console.error(JSON.stringify({ level: "error", traceId, err: String(err) }));
+      const code = (err as { code?: string }).code ?? "SYSTEM_ERROR";
+      reply.raw.write(
+        `data: ${JSON.stringify({ id: globalThis.crypto.randomUUID(), type: "tool.failed", timestamp: new Date().toISOString(), traceId, payload: { code } })}\n\n`,
       );
     }
     reply.raw.end();

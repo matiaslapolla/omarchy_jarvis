@@ -1,8 +1,9 @@
-import type { BaseEvent, UserInput } from "@jarvis/protocol";
+import type { BaseEvent, Intent, UserInput } from "@jarvis/protocol";
 import { DEFAULT_LIMITS, detectIntent, selectRoute } from "@jarvis/core";
 import type { LLMProvider } from "@jarvis/providers";
 import type { Registry } from "@jarvis/tools";
 import { createDefaultRegistry, runToolCall } from "./tools.js";
+import { runDelegated } from "./delegate.js";
 
 export interface PipelineDeps {
   provider: LLMProvider;
@@ -23,6 +24,17 @@ function event(traceId: string, type: BaseEvent["type"], payload: unknown): Base
     traceId,
     payload,
   };
+}
+
+function kindFrom(intent: Intent): "research" | "coding" | "background" {
+  switch (intent) {
+    case "research":
+      return "research";
+    case "coding":
+      return "coding";
+    default:
+      return "background";
+  }
 }
 
 export async function* runInput(
@@ -80,6 +92,13 @@ export async function* runInput(
       }
     };
     yield* match();
+    yield event(traceId, "agent.completed", { text: "Done.", finishReason: "stop", route });
+    return;
+  }
+
+  if (route === "opencode" || route === "claudecode" || route === "background") {
+    const workspace = input.metadata?.currentDirectory ?? process.env.JARVIS_WORKSPACE ?? process.cwd();
+    yield* runDelegated(kindFrom(intent), text, workspace, traceId, route);
     yield event(traceId, "agent.completed", { text: "Done.", finishReason: "stop", route });
     return;
   }
