@@ -43,3 +43,17 @@ curl -s -X POST "$LM/load" -H "content-type: application/json" -d '{"model":"lfm
   | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['ok']; print('reloaded:', d['model'])"
 
 echo "ALL LOCAL-MODEL CHECKS PASSED"
+
+if curl -sf -m 3 "${LLAMA_URL:-http://127.0.0.1:11423}/health" >/dev/null 2>&1; then
+  echo "== llama-server backend (BACKEND=llama, :11424) =="
+  LM2="http://127.0.0.1:11424"
+  (BACKEND=llama LOCAL_MODEL_PORT=11424 node services/local-model/dist/index.js &>/tmp/jarvis-lm-llama.log & echo $! > /tmp/jarvis-lm-llama.pid)
+  for i in $(seq 1 20); do curl -sf "$LM2/health" >/dev/null && break; sleep 0.5; done
+  curl -s -m 120 -X POST "$LM2/chat" -H "content-type: application/json" \
+    -d '{"messages":[{"role":"user","content":"Responde con exactamente: hola"}]}' \
+    | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['backend']=='llama', d; assert len(d['text'])>0; print('llama chat ok:', d['text'][:80])"
+  kill "$(cat /tmp/jarvis-lm-llama.pid)" 2>/dev/null || true
+  echo "ALL LLAMA-BACKEND CHECKS PASSED"
+else
+  echo "SKIP llama backend (no llama-server on :11423)"
+fi

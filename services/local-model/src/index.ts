@@ -4,6 +4,7 @@ import { z } from "zod";
 const PORT = Number(process.env.LOCAL_MODEL_PORT ?? 11421);
 const BACKEND = process.env.BACKEND ?? "ollama";
 const OLLAMA_URL = process.env.OLLAMA_URL ?? "http://127.0.0.1:11434";
+const LLAMA_URL = process.env.LLAMA_URL ?? "http://127.0.0.1:11423";
 const CHAT_MODEL = process.env.LOCAL_CHAT_MODEL ?? "qwen2.5:7b";
 const EMBED_MODEL = process.env.LOCAL_EMBED_MODEL ?? "bge-m3:latest";
 const THINK = process.env.LOCAL_THINK === "1";
@@ -72,6 +73,87 @@ function stubChat(model: string, messages: { role: string; content: string }[]):
   return { text, usage: { input: messages.reduce((n, m) => n + m.content.length, 0), output: text.length } };
 }
 
+async function post(url: string, body: unknown, timeoutMs: number): Promise<Response> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+type ChatMsg = { role: string; content: string };
+
+async function llamaChat(model: string, messages: ChatMsg[], stream: boolean, reply: any): Promise<any> {
+  if (!stream) {
+    const up = await post(`${LLAMA_URL}/v1/chat/completions`, { messages }, 300_000);
+    if (!up.ok) {
+      void reply.code(502).send({ code: "LLAMA_ERROR", status: up.status });
+      return reply;
+    }
+    const json = (await up.json()) as { choices?: { message?: { content?: string } }[]; usage?: { prompt_tokens?: number; completion_tokens?: number } };
+    const text = stripThink(json.choices?.[0]?.message?.content ?? "");
+    return {
+      text,
+      model,
+      usage: { input: json.usage?.prompt_tokens ?? 0, output: json.usage?.completion_tokens ?? 0 },
+      backend: "llama",
+    };
+  }
+  const up = await post(`${LLAMA_URL}/v1/chat/completions`, { messages, stream: true }, 300_000);
+  if (!up.ok || up.body == null) {
+    void reply.code(502).send({ code: "LLAMA_ERROR", status: up.status });
+    return reply;
+  }
+  reply.raw.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
+  const reader = up.body.getReader();
+  const dec = new TextDecoder();
+  const stripper = new ThinkStripper();
+  let buf = "";
+  let full = "";
+  const emit = (s: string): void => {
+    if (!s) return;
+    full += s;
+    reply.raw.write(`data: ${JSON.stringify({ delta: s })}\n\n`);
+  };
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop() ?? "";
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t.startsWith("data:")) continue;
+      const payload = t.slice(5).trim();
+      if (payload === "[DONE]") continue;
+      try {
+        const ev = JSON.parse(payload) as { choices?: { delta?: { content?: string }; finish_reason?: string }[] };
+        emit(stripper.push(ev.choices?.[0]?.delta?.content ?? ""));
+      } catch {
+        continue;
+      }
+    }
+  }
+  emit(stripper.flush());
+  reply.raw.write(`data: ${JSON.stringify({ done: true, model, usage: { input: full.length, output: full.length } })}\n\n`);
+  reply.raw.end();
+  return reply;
+}
+
+async function llamaEmbed(model: string, input: string | string[]): Promise<{ embedding: number[]; dims: number }> {
+  const up = await post(`${LLAMA_URL}/v1/embeddings`, { input }, 120_000);
+  if (!up.ok) throw Object.assign(new Error(`llama embeddings ${up.status}`), { status: up.status });
+  const json = (await up.json()) as { data?: { embedding?: number[] }[] };
+  const first = json.data?.[0]?.embedding ?? [];
+  return { embedding: first, dims: first.length };
+}
 async function ollama(path: string, body: unknown, timeoutMs: number): Promise<Response> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -96,19 +178,37 @@ async function ollamaOk(): Promise<boolean> {
   }
 }
 
+async function llamaOk(): Promise<boolean> {
+  try {
+    const r = await fetch(`${LLAMA_URL}/health`, { signal: AbortSignal.timeout(3000) });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function activeBackend(): Promise<"ollama" | "llama" | "stub"> {
+  if (BACKEND === "llama" && (await llamaOk())) return "llama";
+  if (BACKEND !== "stub" && (await ollamaOk())) return "ollama";
+  if (BACKEND === "llama" && (await ollamaOk())) return "ollama";
+  return "stub";
+}
+
 export function buildServer() {
   const app = Fastify({ logger: false });
 
-  app.get("/health", async () => ({ ok: true, backend: BACKEND, ollama: await ollamaOk() }));
+  app.get("/health", async () => ({ ok: true, backend: await activeBackend(), ollama: await ollamaOk(), llama: await llamaOk() }));
 
   app.post("/chat", async (req, reply) => {
     const body = ChatSchema.parse(req.body);
     const model = body.model ?? CHAT_MODEL;
     const keepAlive = body.keep_alive ?? KEEP_ALIVE;
-    if (BACKEND !== "ollama" || !(await ollamaOk())) {
+    const be = await activeBackend();
+    if (be === "stub") {
       const s = stubChat(model, body.messages);
       return { text: s.text, model, usage: s.usage, backend: "stub" };
     }
+    if (be === "llama") return llamaChat(model, body.messages, body.stream === true, reply);
     if (body.stream === true) {
       const up = await ollama("/api/chat", { model, messages: body.messages, stream: true, think: THINK, keep_alive: keepAlive }, 300_000);
       if (!up.ok || up.body == null) {
@@ -171,8 +271,18 @@ export function buildServer() {
   app.post("/embed", async (req, reply) => {
     const body = EmbedSchema.parse(req.body);
     const model = body.model ?? EMBED_MODEL;
-    if (BACKEND !== "ollama" || !(await ollamaOk())) {
+    const be = await activeBackend();
+    if (be === "stub") {
       return { embedding: [0, 0, 0, 0, 0, 0, 0, 0], model, dims: 8, backend: "stub" };
+    }
+    if (be === "llama") {
+      try {
+        const r = await llamaEmbed(model, body.input);
+        return { embedding: r.embedding, embeddings: [r.embedding], model, dims: r.dims, backend: "llama" };
+      } catch (err) {
+        void reply.code(502).send({ code: "LLAMA_ERROR", message: String(err).slice(0, 200) });
+        return reply;
+      }
     }
     const up = await ollama("/api/embed", { model, input: body.input }, 120_000);
     if (!up.ok) {
@@ -186,7 +296,11 @@ export function buildServer() {
 
   app.post("/load", async (req, reply) => {
     const body = LoadSchema.parse(req.body);
-    if (BACKEND !== "ollama" || !(await ollamaOk())) return { ok: true, model: body.model, backend: "stub" };
+    const be = await activeBackend();
+    if (be === "stub") return { ok: true, model: body.model, backend: "stub" };
+    if (be === "llama") {
+      return { ok: true, model: body.model, backend: "llama", note: "llama-server holds one model; restart with -m to swap" };
+    }
     const up = await ollama("/api/chat", { model: body.model, messages: [{ role: "user", content: "ping" }], stream: false, think: false, keep_alive: body.keep_alive ?? KEEP_ALIVE }, 300_000);
     if (!up.ok) {
       void reply.code(502).send({ code: "OLLAMA_ERROR", status: up.status });
@@ -197,7 +311,11 @@ export function buildServer() {
 
   app.post("/unload", async (req, reply) => {
     const body = LoadSchema.parse(req.body);
-    if (BACKEND !== "ollama" || !(await ollamaOk())) return { ok: true, model: body.model, backend: "stub" };
+    const be = await activeBackend();
+    if (be === "stub") return { ok: true, model: body.model, backend: "stub" };
+    if (be === "llama") {
+      return { ok: true, model: body.model, backend: "llama", note: "llama-server holds one model; stop the process to free VRAM" };
+    }
     const up = await ollama("/api/generate", { model: body.model, keep_alive: 0 }, 60_000);
     if (!up.ok) {
       void reply.code(502).send({ code: "OLLAMA_ERROR", status: up.status });
@@ -207,8 +325,18 @@ export function buildServer() {
   });
 
   app.get("/models", async () => {
-    if (BACKEND !== "ollama" || !(await ollamaOk())) {
+    const be = await activeBackend();
+    if (be === "stub") {
       return { models: [CHAT_MODEL, EMBED_MODEL], resident: [], backend: "stub" };
+    }
+    if (be === "llama") {
+      try {
+        const json = (await (await fetch(`${LLAMA_URL}/v1/models`, { signal: AbortSignal.timeout(5000) })).json()) as { data?: { id?: string }[] };
+        const ids = (json.data ?? []).map((m) => m.id ?? "").filter(Boolean);
+        return { models: ids, resident: ids, backend: "llama" };
+      } catch {
+        return { models: [], resident: [], backend: "llama" };
+      }
     }
     const [tags, ps] = await Promise.all([
       fetch(`${OLLAMA_URL}/api/tags`).then((r) => r.json() as Promise<{ models?: { name?: string }[] }>),
